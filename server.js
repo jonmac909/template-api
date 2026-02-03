@@ -463,11 +463,14 @@ Read the ACTUAL text from frames. Don't guess or make up locations.`;
   
   const jsonMatch = responseText.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
-    const parsed = JSON.parse(jsonMatch[0]);
-    console.log('Kimi found', parsed.totalLocations, 'locations');
-    return parsed;
+    const parsed = safeParseJSON(jsonMatch[0]);
+    if (parsed) {
+      console.log('Kimi found', parsed.totalLocations || parsed.locations?.length, 'locations');
+      return parsed;
+    }
   }
   
+  console.log('Kimi JSON parse failed, returning raw');
   return { raw: responseText };
 }
 
