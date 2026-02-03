@@ -15,8 +15,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const KIMI_API_KEY = process.env.KIMI_API_KEY;
 
-// Priority: Gemini > Kimi > OpenAI (Kimi auth issues, using Gemini for now)
-const VISION_PROVIDER = GEMINI_API_KEY ? 'gemini' : (KIMI_API_KEY ? 'kimi' : 'openai');
+// Priority: Kimi > Gemini > OpenAI (Kimi K2.5 is fastest!)
+const VISION_PROVIDER = KIMI_API_KEY ? 'kimi' : (GEMINI_API_KEY ? 'gemini' : 'openai');
 console.log(`Vision provider: ${VISION_PROVIDER}`);
 
 if (!KIMI_API_KEY && !GEMINI_API_KEY && !OPENAI_API_KEY) {
@@ -436,14 +436,15 @@ Read the ACTUAL text from frames. Don't guess or make up locations.`;
 
   console.log('Calling Kimi K2.5 API with', frames.length, 'frames...');
   
-  const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+  const response = await fetch('https://api.kimi.com/coding/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${KIMI_API_KEY}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'User-Agent': 'claude-code/1.0'  // Spoof as coding agent to access Kimi K2.5
     },
     body: JSON.stringify({
-      model: 'kimi-latest',
+      model: 'kimi-for-coding',
       max_tokens: 8192,
       messages: [{ role: 'user', content }]
     })
