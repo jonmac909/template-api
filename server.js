@@ -333,7 +333,9 @@ Read the ACTUAL text from frames. Don't guess or make up locations.`;
   
   const jsonMatch = responseText.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
-    return safeParseJSON(jsonMatch[0]);
+    const parsed = safeParseJSON(jsonMatch[0]);
+    if (parsed) return parsed;
+    console.log('OpenAI JSON parse failed even with safeParseJSON');
   }
   
   return { raw: responseText };
@@ -446,8 +448,11 @@ IMPORTANT:
   const jsonMatch = responseText.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     const parsed = safeParseJSON(jsonMatch[0]);
-    console.log('Gemini found', parsed.totalLocations, 'locations');
-    return parsed;
+    if (parsed) {
+      console.log('Gemini found', parsed.totalLocations || parsed.locations?.length, 'locations');
+      return parsed;
+    }
+    console.log('Gemini JSON parse failed even with safeParseJSON');
   }
   
   return { raw: responseText };
