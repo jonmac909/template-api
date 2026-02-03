@@ -176,7 +176,8 @@ app.post('/extract', async (req, res) => {
         title: videoData.title,
         author: videoData.author,
         duration,
-        thumbnail: videoData.thumbnail
+        thumbnail: videoData.thumbnail,
+        videoUrl: videoData.videoUrl || ''
       },
       framesExtracted: frames.length,
       analysis
