@@ -10,11 +10,15 @@ const execAsync = promisify(exec);
 const app = express();
 const PORT = process.env.PORT || 3847;
 
-// OpenAI API key - set OPENAI_API_KEY in Railway environment variables
+// API keys - set in Railway environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+if (!GEMINI_API_KEY) {
+  console.warn('WARNING: GEMINI_API_KEY not set - will fall back to OpenAI');
+}
 if (!OPENAI_API_KEY) {
-  console.warn('WARNING: OPENAI_API_KEY not set - /extract endpoint will fail');
+  console.warn('WARNING: OPENAI_API_KEY not set - /extract endpoint may fail');
 }
 
 app.use(cors());
@@ -143,8 +147,10 @@ app.post('/extract', async (req, res) => {
     let frameFiles = (await fs.readdir(framesDir)).filter(f => f.endsWith('.jpg')).sort();
     console.log(`Extracted ${frameFiles.length} frames`);
     
-    // Limit frames to max 20 to avoid OpenAI token limits
-    const MAX_FRAMES = 20;
+    // Gemini can handle many more frames than OpenAI
+    const useGemini = !!GEMINI_API_KEY;
+    const MAX_FRAMES = useGemini ? 120 : 20; // Gemini: 1 frame/sec up to 2 min, OpenAI: 20 max
+    
     if (frameFiles.length > MAX_FRAMES) {
       // Sample frames evenly across the video
       const step = frameFiles.length / MAX_FRAMES;
@@ -154,7 +160,7 @@ app.post('/extract', async (req, res) => {
         sampledFrames.push(frameFiles[idx]);
       }
       frameFiles = sampledFrames;
-      console.log(`Sampled down to ${frameFiles.length} frames to avoid token limits`);
+      console.log(`Sampled down to ${frameFiles.length} frames (using ${useGemini ? 'Gemini' : 'OpenAI'})`);
     }
     
     const frames = [];
@@ -165,8 +171,10 @@ app.post('/extract', async (req, res) => {
       frames.push({ file: frameFile, base64 });
     }
     
-    console.log(`Sending ${frames.length} frames to GPT-4o...`);
-    const analysis = await analyzeFramesWithGPT4o(frames, videoData.title, duration);
+    console.log(`Sending ${frames.length} frames to ${useGemini ? 'Gemini' : 'GPT-4o'}...`);
+    const analysis = useGemini 
+      ? await analyzeFramesWithGemini(frames, videoData.title, duration)
+      : await analyzeFramesWithGPT4o(frames, videoData.title, duration);
     
     await fs.rm(tempDir, { recursive: true, force: true });
     
@@ -261,6 +269,98 @@ Read the ACTUAL text from frames. Don't guess or make up locations.`;
   const jsonMatch = responseText.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     return JSON.parse(jsonMatch[0]);
+  }
+  
+  return { raw: responseText };
+}
+
+// Analyze frames with Gemini 1.5 Pro (supports many more frames)
+async function analyzeFramesWithGemini(frames, title, duration) {
+  const prompt = `Analyze these TikTok video frames. Read ALL text overlays you see.
+
+CRITICAL: 
+- Find EVERY numbered location/day (1), 2), 3)... Days 1-2, Days 3-5, Day 8, etc.)
+- Track the EXACT timestamp (frame number = seconds) where each location FIRST appears
+- Track when each location ENDS (next location appears or video ends)
+- Don't miss any days or locations - look at EVERY frame!
+
+For each frame, extract:
+- The numbered location text (like "1) Dean's Village" or "Days 3-5 Cinque Terre")
+- Note the frame number (which = timestamp in seconds)
+- Any intro/hook text (usually first 1-2 seconds)
+- Any outro/CTA text (usually last 2-3 seconds)
+- FONT STYLE: Describe the font used
+
+Return this JSON:
+{
+  "hookText": "the intro title text you see",
+  "locations": [
+    {"number": 1, "name": "exact location name from frame", "startTime": 0, "endTime": 5},
+    {"number": 2, "name": "exact location name from frame", "startTime": 5, "endTime": 12}
+  ],
+  "outroText": "any ending text",
+  "totalLocations": <count of locations found>,
+  "fontStyle": {
+    "titleFont": {
+      "style": "sans-serif|serif|script|display",
+      "weight": "regular|bold|heavy",
+      "description": "brief description"
+    },
+    "locationFont": {
+      "style": "sans-serif|serif|script|display", 
+      "weight": "regular|bold|heavy",
+      "description": "brief description"
+    }
+  }
+}
+
+IMPORTANT: Each frame is labeled with its timestamp in seconds. Use these to determine startTime and endTime for each location. Total video duration is ${duration} seconds.
+
+Read the ACTUAL text from frames. Don't guess or make up locations.`;
+
+  // Build Gemini API request with inline images
+  const parts = [{ text: prompt }];
+  
+  for (let i = 0; i < frames.length; i++) {
+    parts.push({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: frames[i].base64
+      }
+    });
+    parts.push({ text: `[Frame at ${i} seconds]` });
+  }
+
+  console.log('Calling Gemini API with', frames.length, 'frames...');
+  
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8192
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error('Gemini API error:', error);
+    throw new Error(`Gemini API error: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  
+  console.log('Gemini response length:', responseText.length);
+  
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log('Gemini found', parsed.totalLocations, 'locations');
+    return parsed;
   }
   
   return { raw: responseText };
