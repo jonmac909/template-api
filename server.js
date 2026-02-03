@@ -140,8 +140,22 @@ app.post('/extract', async (req, res) => {
     
     await execAsync(`ffmpeg -i "${videoPath}" -vf "fps=1" "${framesDir}/frame_%02d.jpg" 2>/dev/null`);
     
-    const frameFiles = (await fs.readdir(framesDir)).filter(f => f.endsWith('.jpg')).sort();
+    let frameFiles = (await fs.readdir(framesDir)).filter(f => f.endsWith('.jpg')).sort();
     console.log(`Extracted ${frameFiles.length} frames`);
+    
+    // Limit frames to max 20 to avoid OpenAI token limits
+    const MAX_FRAMES = 20;
+    if (frameFiles.length > MAX_FRAMES) {
+      // Sample frames evenly across the video
+      const step = frameFiles.length / MAX_FRAMES;
+      const sampledFrames = [];
+      for (let i = 0; i < MAX_FRAMES; i++) {
+        const idx = Math.floor(i * step);
+        sampledFrames.push(frameFiles[idx]);
+      }
+      frameFiles = sampledFrames;
+      console.log(`Sampled down to ${frameFiles.length} frames to avoid token limits`);
+    }
     
     const frames = [];
     for (const frameFile of frameFiles) {
@@ -151,7 +165,7 @@ app.post('/extract', async (req, res) => {
       frames.push({ file: frameFile, base64 });
     }
     
-    console.log('Sending frames to GPT-4o...');
+    console.log(`Sending ${frames.length} frames to GPT-4o...`);
     const analysis = await analyzeFramesWithGPT4o(frames, videoData.title, duration);
     
     await fs.rm(tempDir, { recursive: true, force: true });
