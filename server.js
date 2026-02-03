@@ -26,6 +26,33 @@ if (!KIMI_API_KEY && !GEMINI_API_KEY && !OPENAI_API_KEY) {
 app.use(cors());
 app.use(express.json({ limit: '500mb' }));
 
+// Safely parse JSON with cleanup for common AI mistakes
+function safeParseJSON(jsonString) {
+  try {
+    return JSON.parse(jsonString);
+  } catch (e) {
+    console.log('Initial JSON parse failed, attempting cleanup...');
+    
+    let cleaned = jsonString
+      // Remove [...] placeholders that AI sometimes adds
+      .replace(/\[\s*\.\.\.\s*\]/g, '[]')
+      // Remove trailing commas before ] or }
+      .replace(/,\s*([}\]])/g, '$1')
+      // Fix "shots": [...] where AI left placeholder
+      .replace(/"shots":\s*\[\s*\.\.\.\s*\]/g, '"shots": []')
+      // Remove any literal ... in arrays
+      .replace(/,\s*\.\.\./g, '')
+      .replace(/\.\.\.\s*,/g, '');
+    
+    try {
+      return JSON.parse(cleaned);
+    } catch (e2) {
+      console.log('JSON cleanup failed:', e2.message);
+      return null;
+    }
+  }
+}
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'template-api', version: '1.1.0' });
