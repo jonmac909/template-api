@@ -15,8 +15,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const KIMI_API_KEY = process.env.KIMI_API_KEY;
 
-// Priority: Kimi > Gemini > OpenAI (Kimi K2.5 is fastest!)
-const VISION_PROVIDER = KIMI_API_KEY ? 'kimi' : (GEMINI_API_KEY ? 'gemini' : 'openai');
+// Priority: Gemini > Kimi > OpenAI (Gemini is faster for large frame batches!)
+const VISION_PROVIDER = GEMINI_API_KEY ? 'gemini' : (KIMI_API_KEY ? 'kimi' : 'openai');
 console.log(`Vision provider: ${VISION_PROVIDER}`);
 
 if (!KIMI_API_KEY && !GEMINI_API_KEY && !OPENAI_API_KEY) {
