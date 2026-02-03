@@ -344,50 +344,66 @@ async function analyzeFramesWithGemini(frames, title, duration) {
   const prompt = `Analyze these TikTok video frames. Read ALL text overlays and captions you see.
 
 VIDEO TITLE: "${title}"
-(The title may contain a list of locations/scenes - use this as a hint!)
 
-CRITICAL: 
-- Find EVERY numbered location/day (1), 2), 3)... Days 1-2, Days 3-5, Day 8, etc.)
-- Also check CAPTIONS/SUBTITLES at the bottom of frames - they often list all locations!
-- Track the EXACT timestamp (frame number ÷ 2 = seconds, since we extract at 2fps) where each location FIRST appears
-- Track when each location ENDS (next location appears or video ends)
-- Don't miss any days or locations - look at EVERY frame!
+CRITICAL - TWO LEVELS OF ANALYSIS:
+1. LOCATIONS: Find every numbered location/day (Days 1-2 Florence, Days 3-5 Cinque Terre, etc.)
+2. SHOTS: Within EACH location, detect individual camera shots/cuts/scene changes
+
+A "shot" is when the visual scene changes - different camera angle, different setting, different activity.
+Even within "Days 1-2 Florence" (10 seconds), there might be 3-4 different shots.
 
 For each frame, extract:
-- The numbered location text (like "1) Dean's Village" or "Days 3-5 Cinque Terre")
-- Any CAPTIONS or SUBTITLES (often at the bottom, may list all locations)
-- Note the frame number (frame ÷ 2 = timestamp in seconds at 2fps)
-- Any intro/hook text (usually first 1-2 seconds)
-- Any outro/CTA text (usually last 2-3 seconds)
+- The numbered location text (like "Days 1-2 Florence" or "Day 5 Milan")
+- DETECT when the visual scene CHANGES (even if the location text stays the same!)
+- Any captions/subtitles at the bottom
+- Any intro/hook text (first 1-2 seconds)
+- Any outro/CTA text (last 2-3 seconds)
 - FONT STYLE: Describe the font used
 
 Return this JSON:
 {
   "hookText": "the intro title text you see",
   "locations": [
-    {"number": 1, "name": "exact location name from frame", "startTime": 0, "endTime": 5},
-    {"number": 2, "name": "exact location name from frame", "startTime": 5, "endTime": 12}
+    {
+      "number": 1, 
+      "name": "Days 1-2 Florence", 
+      "startTime": 3, 
+      "endTime": 13,
+      "shots": [
+        {"description": "Cathedral dome aerial view", "startTime": 3, "endTime": 6},
+        {"description": "Walking through market", "startTime": 6, "endTime": 9},
+        {"description": "Eating pasta at restaurant", "startTime": 9, "endTime": 13}
+      ]
+    },
+    {
+      "number": 2, 
+      "name": "Days 3-4 Cinque Terre", 
+      "startTime": 13, 
+      "endTime": 20,
+      "shots": [
+        {"description": "Colorful houses on cliff", "startTime": 13, "endTime": 16},
+        {"description": "Swimming in blue water", "startTime": 16, "endTime": 20}
+      ]
+    }
   ],
   "outroText": "any ending text",
-  "totalLocations": <count of locations found>,
+  "totalLocations": <count of locations>,
+  "totalShots": <count of ALL individual shots across all locations>,
   "captionsFound": "any captions/subtitles text you found",
   "fontStyle": {
-    "titleFont": {
-      "style": "sans-serif|serif|script|display",
-      "weight": "regular|bold|heavy",
-      "description": "brief description"
-    },
-    "locationFont": {
-      "style": "sans-serif|serif|script|display", 
-      "weight": "regular|bold|heavy",
-      "description": "brief description"
-    }
+    "detected": "font name or description",
+    "category": "serif|sans-serif|script|display",
+    "weight": "regular|bold|heavy",
+    "suggested": "closest Google Font: Poppins, Montserrat, Playfair Display, Bebas Neue, etc.",
+    "color": "#FFFFFF"
   }
 }
 
-IMPORTANT: Frames are at 2fps, so frame 10 = 5 seconds. Total video duration is ${duration} seconds.
-
-Read the ACTUAL text from frames. Don't guess or make up locations.`;
+IMPORTANT: 
+- Frames are at 2fps, so frame 10 = 5 seconds. Total video duration is ${duration} seconds.
+- Look for VISUAL CHANGES within each location to detect individual shots
+- Each shot should be 2-5 seconds typically
+- Read ACTUAL text from frames. Don't make up locations.`;
 
   // Build Gemini API request with inline images
   const parts = [{ text: prompt }];
