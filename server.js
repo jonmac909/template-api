@@ -42,12 +42,32 @@ function safeParseJSON(jsonString) {
       .replace(/"shots":\s*\[\s*\.\.\.\s*\]/g, '"shots": []')
       // Remove any literal ... in arrays
       .replace(/,\s*\.\.\./g, '')
-      .replace(/\.\.\.\s*,/g, '');
+      .replace(/\.\.\.\s*,/g, '')
+      // Remove comments that AI sometimes adds
+      .replace(/\/\/[^\n]*/g, '')
+      // Remove trailing text after the closing brace
+      .replace(/}[^}]*$/, '}')
+      // Fix truncated arrays - close any unclosed arrays
+      .replace(/,\s*$/, '')
+      // Try to fix truncated JSON by closing open brackets
+      .replace(/\[[^\]]*$/, '[]')
+      .replace(/\{[^}]*$/, '{}');
     
     try {
       return JSON.parse(cleaned);
     } catch (e2) {
       console.log('JSON cleanup failed:', e2.message);
+      // Last resort: try to extract just the locations array
+      const locMatch = jsonString.match(/"locations"\s*:\s*\[([\s\S]*?)\]/);
+      if (locMatch) {
+        try {
+          const locations = JSON.parse('[' + locMatch[1] + ']');
+          console.log('Extracted locations array manually:', locations.length);
+          return { locations, totalLocations: locations.length };
+        } catch (e3) {
+          console.log('Location extraction also failed');
+        }
+      }
       return null;
     }
   }
