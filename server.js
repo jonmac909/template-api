@@ -15,8 +15,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const KIMI_API_KEY = process.env.KIMI_API_KEY;
 
-// Priority: Kimi > Gemini > OpenAI (Kimi is fastest for vision)
-const VISION_PROVIDER = KIMI_API_KEY ? 'kimi' : (GEMINI_API_KEY ? 'gemini' : 'openai');
+// Priority: Gemini > Kimi > OpenAI (Kimi auth issues, using Gemini for now)
+const VISION_PROVIDER = GEMINI_API_KEY ? 'gemini' : (KIMI_API_KEY ? 'kimi' : 'openai');
 console.log(`Vision provider: ${VISION_PROVIDER}`);
 
 if (!KIMI_API_KEY && !GEMINI_API_KEY && !OPENAI_API_KEY) {
@@ -283,17 +283,22 @@ Read the ACTUAL text from frames. Don't guess or make up locations.`;
 
 // Analyze frames with Gemini 1.5 Pro (supports many more frames)
 async function analyzeFramesWithGemini(frames, title, duration) {
-  const prompt = `Analyze these TikTok video frames. Read ALL text overlays you see.
+  const prompt = `Analyze these TikTok video frames. Read ALL text overlays and captions you see.
+
+VIDEO TITLE: "${title}"
+(The title may contain a list of locations/scenes - use this as a hint!)
 
 CRITICAL: 
 - Find EVERY numbered location/day (1), 2), 3)... Days 1-2, Days 3-5, Day 8, etc.)
-- Track the EXACT timestamp (frame number = seconds) where each location FIRST appears
+- Also check CAPTIONS/SUBTITLES at the bottom of frames - they often list all locations!
+- Track the EXACT timestamp (frame number ÷ 2 = seconds, since we extract at 2fps) where each location FIRST appears
 - Track when each location ENDS (next location appears or video ends)
 - Don't miss any days or locations - look at EVERY frame!
 
 For each frame, extract:
 - The numbered location text (like "1) Dean's Village" or "Days 3-5 Cinque Terre")
-- Note the frame number (which = timestamp in seconds)
+- Any CAPTIONS or SUBTITLES (often at the bottom, may list all locations)
+- Note the frame number (frame ÷ 2 = timestamp in seconds at 2fps)
 - Any intro/hook text (usually first 1-2 seconds)
 - Any outro/CTA text (usually last 2-3 seconds)
 - FONT STYLE: Describe the font used
@@ -307,6 +312,7 @@ Return this JSON:
   ],
   "outroText": "any ending text",
   "totalLocations": <count of locations found>,
+  "captionsFound": "any captions/subtitles text you found",
   "fontStyle": {
     "titleFont": {
       "style": "sans-serif|serif|script|display",
@@ -321,7 +327,7 @@ Return this JSON:
   }
 }
 
-IMPORTANT: Each frame is labeled with its timestamp in seconds. Use these to determine startTime and endTime for each location. Total video duration is ${duration} seconds.
+IMPORTANT: Frames are at 2fps, so frame 10 = 5 seconds. Total video duration is ${duration} seconds.
 
 Read the ACTUAL text from frames. Don't guess or make up locations.`;
 
