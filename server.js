@@ -222,10 +222,21 @@ app.post('/extract', async (req, res) => {
     
     console.log(`Sending ${frames.length} frames to ${VISION_PROVIDER}...`);
     let analysis;
-    if (VISION_PROVIDER === 'kimi') {
+    if (VISION_PROVIDER === 'gemini') {
+      try {
+        analysis = await analyzeFramesWithGemini(frames, videoData.title, duration);
+      } catch (geminiError) {
+        // Fallback to Kimi if Gemini fails (rate limits, etc.)
+        console.log('Gemini failed, falling back to Kimi:', geminiError.message);
+        if (KIMI_API_KEY) {
+          console.log('Falling back to Kimi...');
+          analysis = await analyzeFramesWithKimi(frames, videoData.title, duration);
+        } else {
+          throw geminiError;
+        }
+      }
+    } else if (VISION_PROVIDER === 'kimi') {
       analysis = await analyzeFramesWithKimi(frames, videoData.title, duration);
-    } else if (VISION_PROVIDER === 'gemini') {
-      analysis = await analyzeFramesWithGemini(frames, videoData.title, duration);
     } else {
       analysis = await analyzeFramesWithGPT4o(frames, videoData.title, duration);
     }
