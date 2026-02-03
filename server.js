@@ -144,13 +144,14 @@ app.post('/extract', async (req, res) => {
     const framesDir = path.join(tempDir, 'frames');
     await fs.mkdir(framesDir, { recursive: true });
     
-    await execAsync(`ffmpeg -i "${videoPath}" -vf "fps=1" "${framesDir}/frame_%02d.jpg" 2>/dev/null`);
+    // Extract 2 frames per second for better scene detection accuracy
+    await execAsync(`ffmpeg -i "${videoPath}" -vf "fps=2" "${framesDir}/frame_%03d.jpg" 2>/dev/null`);
     
     let frameFiles = (await fs.readdir(framesDir)).filter(f => f.endsWith('.jpg')).sort();
-    console.log(`Extracted ${frameFiles.length} frames`);
+    console.log(`Extracted ${frameFiles.length} frames (2 fps)`);
     
-    // Frame limits by provider: Kimi/Gemini can handle many more than OpenAI
-    const MAX_FRAMES = VISION_PROVIDER === 'openai' ? 20 : 120;
+    // Frame limits by provider: Kimi can handle 200+, OpenAI limited to 20
+    const MAX_FRAMES = VISION_PROVIDER === 'openai' ? 20 : 200;
     
     if (frameFiles.length > MAX_FRAMES) {
       // Sample frames evenly across the video
