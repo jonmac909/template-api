@@ -13,12 +13,14 @@ const PORT = process.env.PORT || 3847;
 // API keys - set in Railway environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const KIMI_API_KEY = process.env.KIMI_API_KEY;
 
-if (!GEMINI_API_KEY) {
-  console.warn('WARNING: GEMINI_API_KEY not set - will fall back to OpenAI');
-}
-if (!OPENAI_API_KEY) {
-  console.warn('WARNING: OPENAI_API_KEY not set - /extract endpoint may fail');
+// Priority: Kimi > Gemini > OpenAI (Kimi is fastest for vision)
+const VISION_PROVIDER = KIMI_API_KEY ? 'kimi' : (GEMINI_API_KEY ? 'gemini' : 'openai');
+console.log(`Vision provider: ${VISION_PROVIDER}`);
+
+if (!KIMI_API_KEY && !GEMINI_API_KEY && !OPENAI_API_KEY) {
+  console.warn('WARNING: No vision API key set - /extract endpoint will fail');
 }
 
 app.use(cors());
@@ -147,9 +149,8 @@ app.post('/extract', async (req, res) => {
     let frameFiles = (await fs.readdir(framesDir)).filter(f => f.endsWith('.jpg')).sort();
     console.log(`Extracted ${frameFiles.length} frames`);
     
-    // Gemini can handle many more frames than OpenAI
-    const useGemini = !!GEMINI_API_KEY;
-    const MAX_FRAMES = useGemini ? 120 : 20; // Gemini: 1 frame/sec up to 2 min, OpenAI: 20 max
+    // Frame limits by provider: Kimi/Gemini can handle many more than OpenAI
+    const MAX_FRAMES = VISION_PROVIDER === 'openai' ? 20 : 120;
     
     if (frameFiles.length > MAX_FRAMES) {
       // Sample frames evenly across the video
@@ -160,7 +161,7 @@ app.post('/extract', async (req, res) => {
         sampledFrames.push(frameFiles[idx]);
       }
       frameFiles = sampledFrames;
-      console.log(`Sampled down to ${frameFiles.length} frames (using ${useGemini ? 'Gemini' : 'OpenAI'})`);
+      console.log(`Sampled down to ${frameFiles.length} frames (using ${VISION_PROVIDER})`);
     }
     
     const frames = [];
@@ -171,10 +172,15 @@ app.post('/extract', async (req, res) => {
       frames.push({ file: frameFile, base64 });
     }
     
-    console.log(`Sending ${frames.length} frames to ${useGemini ? 'Gemini' : 'GPT-4o'}...`);
-    const analysis = useGemini 
-      ? await analyzeFramesWithGemini(frames, videoData.title, duration)
-      : await analyzeFramesWithGPT4o(frames, videoData.title, duration);
+    console.log(`Sending ${frames.length} frames to ${VISION_PROVIDER}...`);
+    let analysis;
+    if (VISION_PROVIDER === 'kimi') {
+      analysis = await analyzeFramesWithKimi(frames, videoData.title, duration);
+    } else if (VISION_PROVIDER === 'gemini') {
+      analysis = await analyzeFramesWithGemini(frames, videoData.title, duration);
+    } else {
+      analysis = await analyzeFramesWithGPT4o(frames, videoData.title, duration);
+    }
     
     await fs.rm(tempDir, { recursive: true, force: true });
     
@@ -360,6 +366,97 @@ Read the ACTUAL text from frames. Don't guess or make up locations.`;
   if (jsonMatch) {
     const parsed = JSON.parse(jsonMatch[0]);
     console.log('Gemini found', parsed.totalLocations, 'locations');
+    return parsed;
+  }
+  
+  return { raw: responseText };
+}
+
+// Analyze frames with Kimi K2.5 (fast, cost-effective, great for vision)
+async function analyzeFramesWithKimi(frames, title, duration) {
+  const prompt = `Analyze these TikTok video frames. Read ALL text overlays you see.
+
+CRITICAL: 
+- Find EVERY numbered location/day (1), 2), 3)... Days 1-2, Days 3-5, Day 8, etc.)
+- Track the EXACT timestamp (frame number = seconds) where each location FIRST appears
+- Track when each location ENDS (next location appears or video ends)
+- Don't miss any days or locations - look at EVERY frame!
+
+For each frame, extract:
+- The numbered location text (like "1) Dean's Village" or "Days 3-5 Cinque Terre")
+- Note the frame number (which = timestamp in seconds)
+- Any intro/hook text (usually first 1-2 seconds)
+- Any outro/CTA text (usually last 2-3 seconds)
+- FONT STYLE: Describe the font used
+
+Return this JSON:
+{
+  "hookText": "the intro title text you see",
+  "locations": [
+    {"number": 1, "name": "exact location name from frame", "startTime": 0, "endTime": 5},
+    {"number": 2, "name": "exact location name from frame", "startTime": 5, "endTime": 12}
+  ],
+  "outroText": "any ending text",
+  "totalLocations": <count of locations found>,
+  "fontStyle": {
+    "titleFont": {
+      "style": "sans-serif|serif|script|display",
+      "weight": "regular|bold|heavy",
+      "description": "brief description"
+    },
+    "locationFont": {
+      "style": "sans-serif|serif|script|display", 
+      "weight": "regular|bold|heavy",
+      "description": "brief description"
+    }
+  }
+}
+
+IMPORTANT: Each frame is labeled with its timestamp in seconds. Use these to determine startTime and endTime for each location. Total video duration is ${duration} seconds.
+
+Read the ACTUAL text from frames. Don't guess or make up locations.`;
+
+  // Build OpenAI-compatible request (Kimi uses same format)
+  const content = [{ type: 'text', text: prompt }];
+  
+  for (let i = 0; i < frames.length; i++) {
+    content.push({
+      type: 'image_url',
+      image_url: { url: `data:image/jpeg;base64,${frames[i].base64}` }
+    });
+    content.push({ type: 'text', text: `[Frame at ${i} seconds]` });
+  }
+
+  console.log('Calling Kimi K2.5 API with', frames.length, 'frames...');
+  
+  const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${KIMI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'kimi-latest',
+      max_tokens: 8192,
+      messages: [{ role: 'user', content }]
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error('Kimi API error:', error);
+    throw new Error(`Kimi API error: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  const responseText = data.choices?.[0]?.message?.content || '';
+  
+  console.log('Kimi response length:', responseText.length);
+  
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log('Kimi found', parsed.totalLocations, 'locations');
     return parsed;
   }
   
